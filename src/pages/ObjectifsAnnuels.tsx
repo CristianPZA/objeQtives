@@ -487,10 +487,6 @@ const ObjectifsAnnuels = () => {
             setError(error);
             setTimeout(() => setError(null), 5000);
           }}
-          onError={(error) => {
-            setError(error);
-            setTimeout(() => setError(null), 5000);
-          }}
         />
       )}
 

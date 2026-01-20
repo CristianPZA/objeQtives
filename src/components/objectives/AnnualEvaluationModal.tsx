@@ -20,8 +20,8 @@ interface ObjectiveDetail {
 interface AnnualEvaluationData {
   objective_id: string;
   skill_description: string;
-  evaluation_score: number;
-  evaluation_comment: string;
+  employee_score: number;
+  employee_comment: string;
   achievements: string;
   difficulties: string;
   learnings: string;
@@ -46,16 +46,19 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
     objective.objectives.map((obj: ObjectiveDetail) => ({
       objective_id: obj.skill_id,
       skill_description: obj.skill_description,
-      evaluation_score: 3,
-      evaluation_comment: '',
+      employee_score: 3,
+      employee_comment: '',
       achievements: '',
       difficulties: '',
       learnings: '',
       next_steps: ''
     }))
   );
+  const [employeeGlobalComment, setEmployeeGlobalComment] = useState('');
+  const [employeeGlobalScore, setEmployeeGlobalScore] = useState(3);
   const [submitting, setSubmitting] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
+  const [showGlobalEvaluation, setShowGlobalEvaluation] = useState(false);
 
   const handleEvaluationChange = (index: number, field: keyof AnnualEvaluationData, value: string | number) => {
     setEvaluations(prev => {
@@ -67,22 +70,26 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
 
   const validateCurrentEvaluation = () => {
     const current = evaluations[currentStep];
-    return current.evaluation_comment.trim() !== '' &&
+    return current.employee_comment.trim() !== '' &&
            current.achievements.trim() !== '' &&
            current.learnings.trim() !== '';
   };
 
   const validateAllEvaluations = () => {
-    return evaluations.every(evalItem => 
-      evalItem.evaluation_comment.trim() !== '' &&
+    return evaluations.every(evalItem =>
+      evalItem.employee_comment.trim() !== '' &&
       evalItem.achievements.trim() !== '' &&
       evalItem.learnings.trim() !== ''
-    );
+    ) && employeeGlobalComment.trim() !== '';
   };
 
   const handleNext = () => {
     if (validateCurrentEvaluation()) {
-      setCurrentStep(prev => Math.min(prev + 1, objective.objectives.length - 1));
+      if (currentStep === objective.objectives.length - 1) {
+        setShowGlobalEvaluation(true);
+      } else {
+        setCurrentStep(prev => Math.min(prev + 1, objective.objectives.length - 1));
+      }
     } else {
       onError(t('evaluation.fillRequiredFields'));
     }
@@ -101,36 +108,52 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
     try {
       setSubmitting(true);
 
-      // Créer l'entrée d'évaluation annuelle
+      // Vérifier si une évaluation existe déjà
+      const { data: existingEval } = await supabase
+        .from('annual_evaluations')
+        .select('id')
+        .eq('annual_objective_id', objective.id)
+        .eq('employee_id', objective.employee_id)
+        .eq('year', objective.year)
+        .maybeSingle();
+
       const evaluationData = {
-        objective_id: objective.id,
-        year: objective.year,
+        annual_objective_id: objective.id,
         employee_id: objective.employee_id,
+        year: objective.year,
         evaluations: evaluations,
+        employee_global_comment: employeeGlobalComment,
+        employee_global_score: employeeGlobalScore,
         status: 'submitted',
         submitted_at: new Date().toISOString()
       };
 
-      // Insérer l'évaluation dans la base de données
-      // Note: Cette table n'existe pas encore, elle devrait être créée
-      const { error } = await supabase
-        .from('annual_evaluations')
-        .insert([evaluationData]);
+      if (existingEval) {
+        // Mettre à jour l'évaluation existante
+        const { error } = await supabase
+          .from('annual_evaluations')
+          .update(evaluationData)
+          .eq('id', existingEval.id);
 
-      if (error) {
-        // Si la table n'existe pas encore, on simule un succès
-        console.warn('Table annual_evaluations might not exist yet:', error);
-        
-        // Marquer les notifications comme lues
-        await markNotificationsAsRead();
-        
-        onSuccess();
-        return;
+        if (error) throw error;
+      } else {
+        // Créer une nouvelle évaluation
+        const { error } = await supabase
+          .from('annual_evaluations')
+          .insert([evaluationData]);
+
+        if (error) throw error;
       }
 
       // Marquer les notifications comme lues
       await markNotificationsAsRead();
-      
+
+      // Mettre à jour le statut de l'objectif annuel
+      await supabase
+        .from('annual_objectives')
+        .update({ status: 'waiting auto evaluation' })
+        .eq('id', objective.id);
+
       onSuccess();
     } catch (err) {
       onError(err instanceof Error ? err.message : t('evaluation.errorSubmitting'));
@@ -243,9 +266,65 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
             </div>
           </div>
 
-          <div className="space-y-6">
-            {/* Objectif courant */}
-            <div className="border border-gray-200 rounded-lg p-6">
+          {showGlobalEvaluation ? (
+            <div className="space-y-6">
+              {/* Évaluation globale */}
+              <div className="border border-gray-200 rounded-lg p-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-6">Évaluation globale de l'année</h3>
+
+                <div className="space-y-6">
+                  {/* Note globale */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      Votre évaluation globale de l'année *
+                    </label>
+                    <div className="grid grid-cols-5 gap-2">
+                      {[1, 2, 3, 4, 5].map((score) => (
+                        <button
+                          key={score}
+                          type="button"
+                          onClick={() => setEmployeeGlobalScore(score)}
+                          className={`p-3 rounded-lg border-2 transition-all text-center ${
+                            employeeGlobalScore === score
+                              ? 'border-indigo-500 bg-indigo-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <div className="flex flex-col items-center gap-1">
+                            <div className="flex">
+                              {Array.from({ length: score }, (_, i) => (
+                                <Star key={i} className="w-4 h-4 fill-current text-yellow-400" />
+                              ))}
+                            </div>
+                            <span className={`text-xs font-medium ${getScoreColor(score)}`}>
+                              {getScoreLabel(score)}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Commentaire global */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Commentaire global sur votre année *
+                    </label>
+                    <textarea
+                      rows={6}
+                      value={employeeGlobalComment}
+                      onChange={(e) => setEmployeeGlobalComment(e.target.value)}
+                      placeholder="Faites une synthèse de votre année, vos principales réalisations, vos apprentissages et vos perspectives d'évolution..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Objectif courant */}
+              <div className="border border-gray-200 rounded-lg p-6">
               <div className="mb-6">
                 <div className="flex items-center gap-2 mb-1">
                   <span className={`text-xs px-2 py-1 rounded ${
@@ -286,9 +365,9 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
                       <button
                         key={score}
                         type="button"
-                        onClick={() => handleEvaluationChange(currentStep, 'evaluation_score', score)}
+                        onClick={() => handleEvaluationChange(currentStep, 'employee_score', score)}
                         className={`p-3 rounded-lg border-2 transition-all text-center ${
-                          currentEvaluation.evaluation_score === score
+                          currentEvaluation.employee_score === score
                             ? 'border-indigo-500 bg-indigo-50'
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
@@ -315,8 +394,8 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
                   </label>
                   <textarea
                     rows={3}
-                    value={currentEvaluation.evaluation_comment}
-                    onChange={(e) => handleEvaluationChange(currentStep, 'evaluation_comment', e.target.value)}
+                    value={currentEvaluation.employee_comment}
+                    onChange={(e) => handleEvaluationChange(currentStep, 'employee_comment', e.target.value)}
                     placeholder={t('evaluation.evaluationComment')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   />
@@ -380,11 +459,12 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
               </div>
             </div>
           </div>
+          )}
 
           {/* Navigation et actions */}
           <div className="flex justify-between pt-6 border-t mt-8">
             <div>
-              {currentStep > 0 && (
+              {!showGlobalEvaluation && currentStep > 0 && (
                 <button
                   onClick={handlePrevious}
                   className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
@@ -392,8 +472,16 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
                   Précédent
                 </button>
               )}
+              {showGlobalEvaluation && (
+                <button
+                  onClick={() => setShowGlobalEvaluation(false)}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  Retour aux objectifs
+                </button>
+              )}
             </div>
-            
+
             <div className="flex gap-3">
               <button
                 onClick={onClose}
@@ -401,8 +489,17 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
               >
                 {t('common.cancel')}
               </button>
-              
-              {currentStep < objective.objectives.length - 1 ? (
+
+              {showGlobalEvaluation ? (
+                <button
+                  onClick={handleSubmit}
+                  disabled={submitting || !validateAllEvaluations()}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  {submitting ? t('common.loading') : t('evaluation.submitEvaluation')}
+                </button>
+              ) : currentStep < objective.objectives.length - 1 ? (
                 <button
                   onClick={handleNext}
                   disabled={!validateCurrentEvaluation()}
@@ -412,12 +509,11 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
                 </button>
               ) : (
                 <button
-                  onClick={handleSubmit}
-                  disabled={submitting || !validateAllEvaluations()}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  onClick={handleNext}
+                  disabled={!validateCurrentEvaluation()}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Save className="w-4 h-4" />
-                  {submitting ? t('common.loading') : t('evaluation.submitEvaluation')}
+                  Évaluation globale
                 </button>
               )}
             </div>
