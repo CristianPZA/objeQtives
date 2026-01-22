@@ -14,7 +14,7 @@ interface AnnualObjective {
   career_level_id: string;
   selected_themes: string[];
   objectives: ObjectiveDetail[];
-  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'waiting auto evaluation' | 'evaluated';
   created_at: string;
   updated_at: string;
   employee: {
@@ -452,7 +452,7 @@ const ObjectifsAnnuels = () => {
               onDelete={handleDeleteObjective}
               currentUserId={currentUser?.id || ''}
               userRole={userRole}
-              onStartEvaluation={isAdmin || hasEvaluationNotification(objective) ? handleStartEvaluation : undefined}
+              onStartEvaluation={isAdmin || hasEvaluationNotification(objective) || objective.status === 'waiting auto evaluation' ? handleStartEvaluation : undefined}
               onSuccess={handleObjectiveUpdated}
             />
           ))
