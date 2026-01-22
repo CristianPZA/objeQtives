@@ -56,6 +56,8 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
   );
   const [employeeGlobalComment, setEmployeeGlobalComment] = useState('');
   const [employeeGlobalScore, setEmployeeGlobalScore] = useState(3);
+  const [promotionRequest, setPromotionRequest] = useState(false);
+  const [promotionJustification, setPromotionJustification] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [showGlobalEvaluation, setShowGlobalEvaluation] = useState(false);
@@ -76,11 +78,15 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
   };
 
   const validateAllEvaluations = () => {
-    return evaluations.every(evalItem =>
+    const evaluationsValid = evaluations.every(evalItem =>
       evalItem.employee_comment.trim() !== '' &&
       evalItem.achievements.trim() !== '' &&
       evalItem.learnings.trim() !== ''
-    ) && employeeGlobalComment.trim() !== '';
+    );
+    const globalCommentValid = employeeGlobalComment.trim() !== '';
+    const promotionValid = !promotionRequest || promotionJustification.trim() !== '';
+
+    return evaluationsValid && globalCommentValid && promotionValid;
   };
 
   const handleNext = () => {
@@ -124,6 +130,8 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
         evaluations: evaluations,
         employee_global_comment: employeeGlobalComment,
         employee_global_score: employeeGlobalScore,
+        promotion_request: promotionRequest,
+        promotion_justification: promotionJustification,
         status: 'submitted',
         submitted_at: new Date().toISOString()
       };
@@ -317,6 +325,47 @@ const AnnualEvaluationModal: React.FC<AnnualEvaluationModalProps> = ({
                       placeholder="Faites une synthèse de votre année, vos principales réalisations, vos apprentissages et vos perspectives d'évolution..."
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     />
+                  </div>
+
+                  {/* Demande de promotion */}
+                  <div className="border-t pt-6">
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        id="promotionRequest"
+                        checked={promotionRequest}
+                        onChange={(e) => {
+                          setPromotionRequest(e.target.checked);
+                          if (!e.target.checked) {
+                            setPromotionJustification('');
+                          }
+                        }}
+                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                      />
+                      <div className="flex-1">
+                        <label htmlFor="promotionRequest" className="text-sm font-medium text-gray-700 cursor-pointer">
+                          Je postule pour une promotion
+                        </label>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Cochez cette case si vous souhaitez être considéré pour une promotion ou un changement de niveau
+                        </p>
+                      </div>
+                    </div>
+
+                    {promotionRequest && (
+                      <div className="mt-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Justification de votre demande de promotion *
+                        </label>
+                        <textarea
+                          rows={5}
+                          value={promotionJustification}
+                          onChange={(e) => setPromotionJustification(e.target.value)}
+                          placeholder="Expliquez pourquoi vous pensez mériter une promotion : vos réalisations exceptionnelles, les nouvelles compétences acquises, vos contributions à l'entreprise, votre niveau d'autonomie, etc."
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
