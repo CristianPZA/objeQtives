@@ -452,7 +452,7 @@ const ObjectifsAnnuels = () => {
               onDelete={handleDeleteObjective}
               currentUserId={currentUser?.id || ''}
               userRole={userRole}
-              onStartEvaluation={isAdmin || hasEvaluationNotification(objective) || objective.status === 'waiting auto evaluation' ? handleStartEvaluation : undefined}
+              onStartEvaluation={handleStartEvaluation}
               onSuccess={handleObjectiveUpdated}
             />
           ))
