@@ -82,8 +82,10 @@ const ObjectiveCard: React.FC<ObjectiveCardProps> = ({
 
   const canEvaluate = () => {
     // Vérifier si l'objectif appartient à l'utilisateur actuel et si la fonction onStartEvaluation est disponible
-    return objective.employee_id === currentUserId && 
-           onStartEvaluation !== undefined;
+    // Le bouton s'affiche pour les statuts 'waiting auto evaluation' ou si l'admin veut éditer
+    return objective.employee_id === currentUserId &&
+           onStartEvaluation !== undefined &&
+           (objective.status === 'waiting auto evaluation' || userRole === 'admin');
   };
 
   const getStatusIcon = (status: string) => {
