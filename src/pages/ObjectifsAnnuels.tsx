@@ -5,6 +5,7 @@ import CreateObjectiveModal from '../components/objectives/CreateObjectiveModal'
 import ObjectiveCard from '../components/objectives/ObjectiveCard';
 import { useTranslation } from 'react-i18next';
 import AnnualEvaluationModal from '../components/objectives/AnnualEvaluationModal';
+import ViewAnnualEvaluationModal from '../components/objectives/ViewAnnualEvaluationModal';
 
 interface AnnualObjective {
   id: string;
@@ -14,7 +15,7 @@ interface AnnualObjective {
   career_level_id: string;
   selected_themes: string[];
   objectives: ObjectiveDetail[];
-  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'waiting auto evaluation' | 'evaluated';
   created_at: string;
   updated_at: string;
   employee: {
@@ -66,6 +67,7 @@ const ObjectifsAnnuels = () => {
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEvaluationModal, setShowEvaluationModal] = useState(false);
+  const [showViewEvaluationModal, setShowViewEvaluationModal] = useState(false);
   const [selectedObjective, setSelectedObjective] = useState<AnnualObjective | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -245,14 +247,19 @@ const ObjectifsAnnuels = () => {
     setShowEvaluationModal(false);
     setSelectedObjective(null);
     setSuccess('Auto-évaluation soumise avec succès');
-    
+
     // Rafraîchir les notifications et les objectifs
     if (currentUser) {
       fetchEvaluationNotifications(currentUser.id);
       fetchObjectives(currentUser.id, userRole || '');
     }
-    
+
     setTimeout(() => setSuccess(null), 3000);
+  };
+
+  const handleViewEvaluation = (objective: AnnualObjective) => {
+    setSelectedObjective(objective);
+    setShowViewEvaluationModal(true);
   };
 
   const getStatusIcon = (status: string) => {
@@ -452,7 +459,8 @@ const ObjectifsAnnuels = () => {
               onDelete={handleDeleteObjective}
               currentUserId={currentUser?.id || ''}
               userRole={userRole}
-              onStartEvaluation={isAdmin || hasEvaluationNotification(objective) ? handleStartEvaluation : undefined}
+              onStartEvaluation={handleStartEvaluation}
+              onViewEvaluation={handleViewEvaluation}
               onSuccess={handleObjectiveUpdated}
             />
           ))
@@ -487,10 +495,6 @@ const ObjectifsAnnuels = () => {
             setError(error);
             setTimeout(() => setError(null), 5000);
           }}
-          onError={(error) => {
-            setError(error);
-            setTimeout(() => setError(null), 5000);
-          }}
         />
       )}
 
@@ -507,6 +511,19 @@ const ObjectifsAnnuels = () => {
             setError(error);
             setTimeout(() => setError(null), 5000);
           }}
+        />
+      )}
+
+      {/* Modal de visualisation de l'auto-évaluation */}
+      {showViewEvaluationModal && selectedObjective && (
+        <ViewAnnualEvaluationModal
+          objective={selectedObjective}
+          onClose={() => {
+            setShowViewEvaluationModal(false);
+            setSelectedObjective(null);
+          }}
+          userRole={userRole || ''}
+          currentUserId={currentUser?.id || ''}
         />
       )}
     </div>

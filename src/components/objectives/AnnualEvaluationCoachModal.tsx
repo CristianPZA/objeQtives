@@ -54,8 +54,11 @@ const AnnualEvaluationCoachModal: React.FC<AnnualEvaluationCoachModalProps> = ({
       development_recommendations: ''
     }))
   );
+  const [coachGlobalComment, setCoachGlobalComment] = useState('');
+  const [coachGlobalScore, setCoachGlobalScore] = useState(3);
   const [submitting, setSubmitting] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
+  const [showGlobalEvaluation, setShowGlobalEvaluation] = useState(false);
 
   const handleEvaluationChange = (index: number, field: keyof CoachEvaluationData, value: string | number) => {
     setCoachEvaluations(prev => {
@@ -72,15 +75,19 @@ const AnnualEvaluationCoachModal: React.FC<AnnualEvaluationCoachModalProps> = ({
   };
 
   const validateAllEvaluations = () => {
-    return coachEvaluations.every(evalItem => 
+    return coachEvaluations.every(evalItem =>
       evalItem.coach_comment.trim() !== '' &&
       evalItem.strengths.trim() !== ''
-    );
+    ) && coachGlobalComment.trim() !== '';
   };
 
   const handleNext = () => {
     if (validateCurrentEvaluation()) {
-      setCurrentStep(prev => Math.min(prev + 1, objective.objectives.length - 1));
+      if (currentStep === objective.objectives.length - 1) {
+        setShowGlobalEvaluation(true);
+      } else {
+        setCurrentStep(prev => Math.min(prev + 1, objective.objectives.length - 1));
+      }
     } else {
       onError(t('evaluation.fillRequiredFields'));
     }
@@ -99,30 +106,60 @@ const AnnualEvaluationCoachModal: React.FC<AnnualEvaluationCoachModalProps> = ({
     try {
       setSubmitting(true);
 
-      // Créer l'entrée d'évaluation coach
+      // Récupérer le coach_id de l'utilisateur connecté
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Utilisateur non connecté');
+
+      // Vérifier si une évaluation coach existe déjà
+      const { data: existingEval } = await supabase
+        .from('annual_coach_evaluations')
+        .select('id')
+        .eq('annual_evaluation_id', employeeEvaluation.id)
+        .eq('annual_objective_id', objective.id)
+        .eq('coach_id', user.id)
+        .maybeSingle();
+
       const evaluationData = {
         annual_evaluation_id: employeeEvaluation.id,
-        objective_id: objective.id,
-        year: objective.year,
+        annual_objective_id: objective.id,
+        coach_id: user.id,
         employee_id: objective.employee_id,
+        year: objective.year,
         coach_evaluations: coachEvaluations,
+        coach_global_comment: coachGlobalComment,
+        coach_global_score: coachGlobalScore,
         status: 'completed',
         completed_at: new Date().toISOString()
       };
 
-      // Insérer l'évaluation dans la base de données
-      // Note: Cette table n'existe pas encore, elle devrait être créée
-      const { error } = await supabase
-        .from('annual_coach_evaluations')
-        .insert([evaluationData]);
+      if (existingEval) {
+        // Mettre à jour l'évaluation existante
+        const { error } = await supabase
+          .from('annual_coach_evaluations')
+          .update(evaluationData)
+          .eq('id', existingEval.id);
 
-      if (error) {
-        // Si la table n'existe pas encore, on simule un succès
-        console.warn('Table annual_coach_evaluations might not exist yet:', error);
-        onSuccess();
-        return;
+        if (error) throw error;
+      } else {
+        // Créer une nouvelle évaluation
+        const { error } = await supabase
+          .from('annual_coach_evaluations')
+          .insert([evaluationData]);
+
+        if (error) throw error;
       }
-      
+
+      // Mettre à jour le statut de l'évaluation annuelle et de l'objectif
+      await supabase
+        .from('annual_evaluations')
+        .update({ status: 'reviewed' })
+        .eq('id', employeeEvaluation.id);
+
+      await supabase
+        .from('annual_objectives')
+        .update({ status: 'evaluated' })
+        .eq('id', objective.id);
+
       onSuccess();
     } catch (err) {
       onError(err instanceof Error ? err.message : t('evaluation.errorSubmitting'));
@@ -207,9 +244,65 @@ const AnnualEvaluationCoachModal: React.FC<AnnualEvaluationCoachModalProps> = ({
             </div>
           </div>
 
-          <div className="space-y-6">
-            {/* Objectif courant */}
-            <div className="border border-gray-200 rounded-lg p-6">
+          {showGlobalEvaluation ? (
+            <div className="space-y-6">
+              {/* Évaluation globale du coach */}
+              <div className="border border-gray-200 rounded-lg p-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-6">Évaluation globale du coach</h3>
+
+                <div className="space-y-6">
+                  {/* Note finale du coach */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      Note finale de performance *
+                    </label>
+                    <div className="grid grid-cols-5 gap-2">
+                      {[1, 2, 3, 4, 5].map((score) => (
+                        <button
+                          key={score}
+                          type="button"
+                          onClick={() => setCoachGlobalScore(score)}
+                          className={`p-3 rounded-lg border-2 transition-all text-center ${
+                            coachGlobalScore === score
+                              ? 'border-indigo-500 bg-indigo-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <div className="flex flex-col items-center gap-1">
+                            <div className="flex">
+                              {Array.from({ length: score }, (_, i) => (
+                                <Star key={i} className="w-4 h-4 fill-current text-yellow-400" />
+                              ))}
+                            </div>
+                            <span className={`text-xs font-medium ${getScoreColor(score)}`}>
+                              {getScoreLabel(score)}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Commentaire global du coach */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Commentaire global sur la performance annuelle *
+                    </label>
+                    <textarea
+                      rows={6}
+                      value={coachGlobalComment}
+                      onChange={(e) => setCoachGlobalComment(e.target.value)}
+                      placeholder="Faites une synthèse de la performance annuelle du collaborateur, ses points forts, axes d'amélioration et recommandations pour son développement..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Objectif courant */}
+              <div className="border border-gray-200 rounded-lg p-6">
               <div className="mb-6">
                 <div className="flex items-center gap-2 mb-1">
                   <span className={`text-xs px-2 py-1 rounded ${
@@ -365,11 +458,12 @@ const AnnualEvaluationCoachModal: React.FC<AnnualEvaluationCoachModalProps> = ({
               </div>
             </div>
           </div>
+          )}
 
           {/* Navigation et actions */}
           <div className="flex justify-between pt-6 border-t mt-8">
             <div>
-              {currentStep > 0 && (
+              {!showGlobalEvaluation && currentStep > 0 && (
                 <button
                   onClick={handlePrevious}
                   className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
@@ -377,8 +471,16 @@ const AnnualEvaluationCoachModal: React.FC<AnnualEvaluationCoachModalProps> = ({
                   Précédent
                 </button>
               )}
+              {showGlobalEvaluation && (
+                <button
+                  onClick={() => setShowGlobalEvaluation(false)}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  Retour aux objectifs
+                </button>
+              )}
             </div>
-            
+
             <div className="flex gap-3">
               <button
                 onClick={onClose}
@@ -386,8 +488,17 @@ const AnnualEvaluationCoachModal: React.FC<AnnualEvaluationCoachModalProps> = ({
               >
                 {t('common.cancel')}
               </button>
-              
-              {currentStep < objective.objectives.length - 1 ? (
+
+              {showGlobalEvaluation ? (
+                <button
+                  onClick={handleSubmit}
+                  disabled={submitting || !validateAllEvaluations()}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  {submitting ? t('common.loading') : 'Soumettre l\'évaluation'}
+                </button>
+              ) : currentStep < objective.objectives.length - 1 ? (
                 <button
                   onClick={handleNext}
                   disabled={!validateCurrentEvaluation()}
@@ -397,12 +508,11 @@ const AnnualEvaluationCoachModal: React.FC<AnnualEvaluationCoachModalProps> = ({
                 </button>
               ) : (
                 <button
-                  onClick={handleSubmit}
-                  disabled={submitting || !validateAllEvaluations()}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  onClick={handleNext}
+                  disabled={!validateCurrentEvaluation()}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Save className="w-4 h-4" />
-                  {submitting ? t('common.loading') : 'Soumettre l\'évaluation'}
+                  Évaluation finale
                 </button>
               )}
             </div>

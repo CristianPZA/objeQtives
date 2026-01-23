@@ -11,7 +11,7 @@ interface ObjectiveCardProps {
   currentUserId: string;
   userRole: string | null;
   onStartEvaluation?: (objective: any) => void;
-  onSuccess?: () => void;
+  onViewEvaluation?: (objective: any) => void;
   onSuccess?: () => void;
 }
 
@@ -21,6 +21,7 @@ const ObjectiveCard: React.FC<ObjectiveCardProps> = ({
   currentUserId,
   userRole,
   onStartEvaluation,
+  onViewEvaluation,
   onSuccess
 }) => {
   const { t } = useTranslation();
@@ -81,15 +82,34 @@ const ObjectiveCard: React.FC<ObjectiveCardProps> = ({
   };
 
   const canEvaluate = () => {
-    // Vérifier si l'objectif appartient à l'utilisateur actuel et si la fonction onStartEvaluation est disponible
-    return objective.employee_id === currentUserId && 
-           onStartEvaluation !== undefined;
+    // Le bouton s'affiche si :
+    // 1. L'utilisateur est le propriétaire des objectifs OU c'est un admin
+    // 2. Le statut est 'approved' ou 'waiting auto evaluation'
+    // 3. La fonction onStartEvaluation est disponible
+
+    const isOwner = objective.employee_id === currentUserId;
+    const isAdmin = userRole === 'admin';
+    const hasCorrectStatus = objective.status === 'approved' || objective.status === 'waiting auto evaluation';
+    const hasFunction = onStartEvaluation !== undefined;
+
+    return (isOwner || isAdmin) && hasCorrectStatus && hasFunction;
+  };
+
+  const canViewEvaluation = () => {
+    // L'utilisateur peut voir l'auto-évaluation si :
+    // 1. L'auto-évaluation a été soumise (status = 'submitted')
+    // 2. L'utilisateur est le propriétaire, un coach ou un admin
+
+    const isOwner = objective.employee_id === currentUserId;
+    const isCoachOrAdmin = userRole === 'coach' || userRole === 'admin';
+    const evaluationSubmitted = objective.status === 'submitted' || objective.status === 'evaluated';
+    const hasFunction = onViewEvaluation !== undefined;
+
+    return (isOwner || isCoachOrAdmin) && evaluationSubmitted && hasFunction;
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'draft':
-        return '📝';
       case 'draft':
         return '📝';
       case 'submitted':
@@ -126,8 +146,6 @@ const ObjectiveCard: React.FC<ObjectiveCardProps> = ({
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'draft':
-        return 'bg-gray-100 text-gray-800';
       case 'draft':
         return 'bg-gray-100 text-gray-800';
       case 'submitted':
@@ -283,6 +301,19 @@ const ObjectiveCard: React.FC<ObjectiveCardProps> = ({
             >
               <Star className="w-4 h-4" />
               Commencer l'auto-évaluation
+            </button>
+          </div>
+        )}
+
+        {/* Bouton de visualisation de l'auto-évaluation */}
+        {canViewEvaluation() && (
+          <div className="mb-4">
+            <button
+              onClick={() => onViewEvaluation && onViewEvaluation(objective)}
+              className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center justify-center gap-2 transition-colors"
+            >
+              <Eye className="w-4 h-4" />
+              Voir l'auto-évaluation
             </button>
           </div>
         )}

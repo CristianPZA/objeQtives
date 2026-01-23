@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Target, Star, TrendingUp, Calendar, User, BookOpen, Award, ChevronDown, ChevronRight, Eye, CheckCircle, AlertCircle, Edit, Trash2, Plus } from 'lucide-react';
+import { Users, Target, Star, TrendingUp, Calendar, User, BookOpen, Award, ChevronDown, ChevronRight, Eye, CheckCircle, AlertCircle, Edit, Trash2, Plus, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useTranslation } from 'react-i18next';
+import AnnualEvaluationCoachModal from '../components/objectives/AnnualEvaluationCoachModal';
 
 interface CoachingEvaluation {
   evaluation_id: string;
@@ -39,7 +40,7 @@ interface AnnualObjective {
   career_level_id: string;
   selected_themes: string[];
   objectives: any[];
-  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'waiting auto evaluation' | 'evaluated';
   created_at: string;
   updated_at: string;
   employee: {
@@ -56,18 +57,52 @@ interface AnnualObjective {
   };
 }
 
+interface AnnualEvaluation {
+  id: string;
+  annual_objective_id: string;
+  employee_id: string;
+  year: number;
+  evaluations: any[];
+  employee_global_comment: string;
+  employee_global_score: number;
+  status: 'draft' | 'submitted' | 'reviewed';
+  submitted_at: string;
+  created_at: string;
+  updated_at: string;
+  annual_objective: AnnualObjective;
+}
+
+interface CoachEvaluation {
+  id: string;
+  annual_evaluation_id: string;
+  annual_objective_id: string;
+  coach_id: string;
+  employee_id: string;
+  year: number;
+  coach_evaluations: any[];
+  coach_global_comment: string;
+  coach_global_score: number;
+  status: 'draft' | 'in_progress' | 'completed';
+  completed_at: string;
+  created_at: string;
+}
+
 const MonCoaching = () => {
   const { t } = useTranslation();
   const [evaluations, setEvaluations] = useState<CoachingEvaluation[]>([]);
   const [annualObjectives, setAnnualObjectives] = useState<AnnualObjective[]>([]);
+  const [annualEvaluations, setAnnualEvaluations] = useState<AnnualEvaluation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [expandedEvaluations, setExpandedEvaluations] = useState<Set<string>>(new Set());
   const [expandedObjectives, setExpandedObjectives] = useState<Set<string>>(new Set());
+  const [expandedAnnualEvaluations, setExpandedAnnualEvaluations] = useState<Set<string>>(new Set());
   const [selectedEmployee, setSelectedEmployee] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'evaluations' | 'objectives'>('evaluations');
+  const [activeTab, setActiveTab] = useState<'evaluations' | 'objectives' | 'annual_evaluations'>('evaluations');
+  const [showCoachEvaluationModal, setShowCoachEvaluationModal] = useState(false);
+  const [selectedEvaluationForCoach, setSelectedEvaluationForCoach] = useState<{objective: AnnualObjective, employeeEvaluation: AnnualEvaluation} | null>(null);
 
   useEffect(() => {
     checkUserAndFetchData();
@@ -91,6 +126,7 @@ const MonCoaching = () => {
       setCurrentUser(profile);
       await fetchCoachingEvaluations(user.id);
       await fetchAnnualObjectives(user.id);
+      await fetchAnnualEvaluations(user.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.loadingError'));
     } finally {
@@ -123,7 +159,7 @@ const MonCoaching = () => {
         .eq('coach_id', coachId);
 
       if (coacheesError) throw coacheesError;
-      
+
       if (!coachees || coachees.length === 0) {
         setAnnualObjectives([]);
         return;
@@ -151,6 +187,47 @@ const MonCoaching = () => {
     }
   };
 
+  const fetchAnnualEvaluations = async (coachId: string) => {
+    try {
+      // Récupérer les IDs des coachés
+      const { data: coachees, error: coacheesError } = await supabase
+        .from('user_profiles')
+        .select('id')
+        .eq('coach_id', coachId);
+
+      if (coacheesError) throw coacheesError;
+
+      if (!coachees || coachees.length === 0) {
+        setAnnualEvaluations([]);
+        return;
+      }
+
+      const coacheeIds = coachees.map(coachee => coachee.id);
+
+      // Récupérer les évaluations annuelles des coachés
+      const { data: evaluationsData, error: evaluationsError } = await supabase
+        .from('annual_evaluations')
+        .select(`
+          *,
+          annual_objective:annual_objectives!annual_objective_id(
+            *,
+            employee:user_profiles!employee_id(full_name, role),
+            career_pathway:career_areas!career_pathway_id(name, color),
+            career_level:career_levels!career_level_id(name, color)
+          )
+        `)
+        .in('employee_id', coacheeIds)
+        .eq('status', 'submitted')
+        .order('submitted_at', { ascending: false });
+
+      if (evaluationsError) throw evaluationsError;
+      setAnnualEvaluations(evaluationsData || []);
+    } catch (err) {
+      console.error('Error fetching annual evaluations:', err);
+      setError('Erreur lors du chargement des évaluations annuelles');
+    }
+  };
+
   const toggleEvaluationExpansion = (evaluationId: string) => {
     setExpandedEvaluations(prev => {
       const newSet = new Set(prev);
@@ -173,6 +250,37 @@ const MonCoaching = () => {
       }
       return newSet;
     });
+  };
+
+  const toggleAnnualEvaluationExpansion = (evaluationId: string) => {
+    setExpandedAnnualEvaluations(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(evaluationId)) {
+        newSet.delete(evaluationId);
+      } else {
+        newSet.add(evaluationId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleStartCoachEvaluation = (evaluation: AnnualEvaluation) => {
+    setSelectedEvaluationForCoach({
+      objective: evaluation.annual_objective,
+      employeeEvaluation: evaluation
+    });
+    setShowCoachEvaluationModal(true);
+  };
+
+  const handleCoachEvaluationCompleted = () => {
+    setShowCoachEvaluationModal(false);
+    setSelectedEvaluationForCoach(null);
+    setSuccess('Évaluation coach enregistrée avec succès');
+    if (currentUser) {
+      fetchAnnualEvaluations(currentUser.id);
+      fetchAnnualObjectives(currentUser.id);
+    }
+    setTimeout(() => setSuccess(null), 3000);
   };
 
   const getScoreStars = (score: number) => {
@@ -311,13 +419,17 @@ const MonCoaching = () => {
     }
   };
 
-  const filteredEvaluations = selectedEmployee 
+  const filteredEvaluations = selectedEmployee
     ? evaluations.filter(currentEval => currentEval.employe_id === selectedEmployee)
     : evaluations;
 
   const filteredObjectives = selectedEmployee
     ? annualObjectives.filter(objective => objective.employee_id === selectedEmployee)
     : annualObjectives;
+
+  const filteredAnnualEvaluations = selectedEmployee
+    ? annualEvaluations.filter(evaluation => evaluation.employee_id === selectedEmployee)
+    : annualEvaluations;
 
   const getEmployeeStats = (employeeId: string) => {
     const employeeEvals = evaluations.filter(currentEval => currentEval.employe_id === employeeId);
@@ -453,6 +565,23 @@ const MonCoaching = () => {
               Objectifs annuels
               <span className="bg-indigo-100 text-indigo-800 text-xs px-2 py-1 rounded-full">
                 {annualObjectives.length}
+              </span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('annual_evaluations')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === 'annual_evaluations'
+                ? 'border-indigo-500 text-indigo-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Award className="w-5 h-5" />
+              Évaluations annuelles
+              <span className="bg-indigo-100 text-indigo-800 text-xs px-2 py-1 rounded-full">
+                {annualEvaluations.length}
               </span>
             </div>
           </button>
@@ -976,6 +1105,177 @@ const MonCoaching = () => {
             </div>
           )}
         </div>
+      )}
+
+      {/* Onglet Évaluations annuelles */}
+      {activeTab === 'annual_evaluations' && (
+        <div className="space-y-4">
+          {filteredAnnualEvaluations.length > 0 ? (
+            filteredAnnualEvaluations.map((evaluation) => {
+              const isExpanded = expandedAnnualEvaluations.has(evaluation.id);
+              const objective = evaluation.annual_objective;
+
+              return (
+                <div key={evaluation.id} className="bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+                  <div className="p-6">
+                    {/* Header */}
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <Calendar className="w-5 h-5 text-indigo-600" />
+                          <h3 className="text-lg font-semibold text-gray-900">
+                            Évaluation annuelle {evaluation.year}
+                          </h3>
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            En attente d'évaluation coach
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-4 text-sm text-gray-600">
+                          <div className="flex items-center gap-1">
+                            <User className="w-4 h-4" />
+                            <span>{objective.employee.full_name}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Star className="w-4 h-4 text-yellow-400" />
+                            <span>Note globale employé: {evaluation.employee_global_score}/5</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-2">
+                          <div className="inline-flex items-center px-3 py-1 rounded-lg text-sm font-medium border bg-gray-50 text-gray-700 border-gray-200">
+                            <BookOpen className="w-4 h-4 mr-2" />
+                            {objective.career_pathway?.name || 'Parcours non défini'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleStartCoachEvaluation(evaluation)}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-2 transition-colors"
+                        >
+                          <Edit className="w-4 h-4" />
+                          Évaluer
+                        </button>
+                        <button
+                          onClick={() => toggleAnnualEvaluationExpansion(evaluation.id)}
+                          className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100"
+                        >
+                          {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Commentaire global de l'employé */}
+                    <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                      <h4 className="text-sm font-medium text-blue-800 mb-2">Commentaire global de l'employé</h4>
+                      <p className="text-sm text-blue-700">{evaluation.employee_global_comment}</p>
+                    </div>
+
+                    {/* Détails des évaluations par objectif */}
+                    {isExpanded && (
+                      <div className="border-t pt-4 space-y-4">
+                        <h4 className="font-medium text-gray-900 mb-3">
+                          Évaluations détaillées ({evaluation.evaluations.length} objectifs)
+                        </h4>
+                        {evaluation.evaluations.map((evalItem: any, index: number) => {
+                          const objectiveDetail = objective.objectives[index];
+
+                          return (
+                            <div key={index} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                              <div className="mb-3">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded">
+                                    {objectiveDetail?.theme_name || 'Thème non défini'}
+                                  </span>
+                                </div>
+                                <h5 className="font-medium text-gray-900">
+                                  {index + 1}. {evalItem.skill_description}
+                                </h5>
+                              </div>
+
+                              <div className="bg-blue-50 rounded p-3">
+                                <h6 className="text-sm font-medium text-blue-800 mb-2">Auto-évaluation</h6>
+                                <div className="flex items-center gap-2 mb-2">
+                                  <div className="flex">
+                                    {getScoreStars(evalItem.employee_score)}
+                                  </div>
+                                  <span className="text-sm text-blue-700">({evalItem.employee_score}/5)</span>
+                                </div>
+                                <p className="text-sm text-blue-700 mb-2">
+                                  <strong>Commentaire:</strong> {evalItem.employee_comment}
+                                </p>
+                                <p className="text-sm text-blue-700 mb-1">
+                                  <strong>Réalisations:</strong> {evalItem.achievements}
+                                </p>
+                                {evalItem.difficulties && (
+                                  <p className="text-sm text-blue-700 mb-1">
+                                    <strong>Difficultés:</strong> {evalItem.difficulties}
+                                  </p>
+                                )}
+                                <p className="text-sm text-blue-700 mb-1">
+                                  <strong>Apprentissages:</strong> {evalItem.learnings}
+                                </p>
+                                {evalItem.next_steps && (
+                                  <p className="text-sm text-blue-700">
+                                    <strong>Prochaines étapes:</strong> {evalItem.next_steps}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Footer */}
+                    <div className="flex justify-between items-center text-xs text-gray-500 mt-4 pt-4 border-t">
+                      <span>
+                        Soumis le {format(new Date(evaluation.submitted_at), 'dd/MM/yyyy à HH:mm', { locale: fr })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="text-center py-12 bg-white rounded-lg shadow-sm border">
+              <Award className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Aucune évaluation annuelle en attente</h3>
+              <p className="text-gray-600">
+                {selectedEmployee
+                  ? "Ce coaché n'a pas encore soumis d'évaluation annuelle."
+                  : "Aucun de vos coachés n'a encore soumis d'évaluation annuelle."}
+              </p>
+              {selectedEmployee && (
+                <button
+                  onClick={() => setSelectedEmployee('')}
+                  className="mt-4 px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors"
+                >
+                  Voir tous les coachés
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modal d'évaluation coach */}
+      {showCoachEvaluationModal && selectedEvaluationForCoach && (
+        <AnnualEvaluationCoachModal
+          objective={selectedEvaluationForCoach.objective}
+          employeeEvaluation={selectedEvaluationForCoach.employeeEvaluation}
+          onClose={() => {
+            setShowCoachEvaluationModal(false);
+            setSelectedEvaluationForCoach(null);
+          }}
+          onSuccess={handleCoachEvaluationCompleted}
+          onError={(error) => {
+            setError(error);
+            setTimeout(() => setError(null), 5000);
+          }}
+        />
       )}
     </div>
   );
