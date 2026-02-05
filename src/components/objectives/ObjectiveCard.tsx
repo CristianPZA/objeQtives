@@ -102,7 +102,7 @@ const ObjectiveCard: React.FC<ObjectiveCardProps> = ({
 
     const isOwner = objective.employee_id === currentUserId;
     const isCoachOrAdmin = userRole === 'coach' || userRole === 'admin';
-    const evaluationSubmitted = objective.status === 'submitted' || objective.status === 'evaluated';
+    const evaluationSubmitted = objective.status === 'submitted' || objective.status === 'waiting auto evaluation' || objective.status === 'evaluated';
     const hasFunction = onViewEvaluation !== undefined;
 
     return (isOwner || isCoachOrAdmin) && evaluationSubmitted && hasFunction;

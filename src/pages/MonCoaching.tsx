@@ -92,6 +92,7 @@ const MonCoaching = () => {
   const [evaluations, setEvaluations] = useState<CoachingEvaluation[]>([]);
   const [annualObjectives, setAnnualObjectives] = useState<AnnualObjective[]>([]);
   const [annualEvaluations, setAnnualEvaluations] = useState<AnnualEvaluation[]>([]);
+  const [annualCoachEvaluations, setAnnualCoachEvaluations] = useState<CoachEvaluation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -127,6 +128,7 @@ const MonCoaching = () => {
       await fetchCoachingEvaluations(user.id);
       await fetchAnnualObjectives(user.id);
       await fetchAnnualEvaluations(user.id);
+      await fetchAnnualCoachEvaluations(user.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.loadingError'));
     } finally {
@@ -217,7 +219,7 @@ const MonCoaching = () => {
           )
         `)
         .in('employee_id', coacheeIds)
-        .eq('status', 'submitted')
+        .in('status', ['submitted', 'reviewed'])
         .order('submitted_at', { ascending: false });
 
       if (evaluationsError) throw evaluationsError;
@@ -225,6 +227,22 @@ const MonCoaching = () => {
     } catch (err) {
       console.error('Error fetching annual evaluations:', err);
       setError('Erreur lors du chargement des évaluations annuelles');
+    }
+  };
+
+  const fetchAnnualCoachEvaluations = async (coachId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('annual_coach_evaluations')
+        .select('*')
+        .eq('coach_id', coachId)
+        .order('completed_at', { ascending: false });
+
+      if (error) throw error;
+      setAnnualCoachEvaluations(data || []);
+    } catch (err) {
+      console.error('Error fetching annual coach evaluations:', err);
+      setError('Erreur lors du chargement des évaluations coach');
     }
   };
 
@@ -431,16 +449,40 @@ const MonCoaching = () => {
     ? annualEvaluations.filter(evaluation => evaluation.employee_id === selectedEmployee)
     : annualEvaluations;
 
+  const getAnnualEvaluationForObjective = (objectiveId: string) => {
+    return annualEvaluations.find(evaluation => evaluation.annual_objective_id === objectiveId) || null;
+  };
+
+  const getCoachEvaluationForObjective = (objectiveId: string) => {
+    return annualCoachEvaluations.find(evaluation => evaluation.annual_objective_id === objectiveId) || null;
+  };
+
   const getEmployeeStats = (employeeId: string) => {
-    const employeeEvals = evaluations.filter(currentEval => currentEval.employe_id === employeeId);
-    const avgScore = employeeEvals.length > 0 
-      ? employeeEvals.reduce((sum, currentEval) => sum + currentEval.note_finale, 0) / employeeEvals.length
+    const employeeAnnualEvals = annualEvaluations.filter(evaluation => evaluation.employee_id === employeeId);
+    const latestAnnualEval = employeeAnnualEvals[0];
+    const avgScore = employeeAnnualEvals.length > 0 
+      ? employeeAnnualEvals.reduce((sum, evalItem) => sum + (evalItem.employee_global_score || 0), 0) / employeeAnnualEvals.length
       : 0;
     return {
-      totalEvaluations: employeeEvals.length,
+      totalEvaluations: employeeAnnualEvals.length,
       averageScore: avgScore,
-      lastEvaluation: employeeEvals[0]?.date_soumission
+      lastEvaluation: latestAnnualEval?.submitted_at,
+      lastAnnualStatus: latestAnnualEval?.status || null
     };
+  };
+
+  const handleKpiClick = (targetTab?: 'evaluations' | 'objectives' | 'annual_evaluations', sectionId?: string) => {
+    if (targetTab) {
+      setActiveTab(targetTab);
+    }
+    if (sectionId) {
+      setTimeout(() => {
+        const section = document.getElementById(sectionId);
+        if (section) {
+          section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 0);
+    }
   };
 
   if (loading) {
@@ -476,7 +518,11 @@ const MonCoaching = () => {
 
       {/* Statistiques globales */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white p-6 rounded-lg shadow-sm border">
+        <button
+          type="button"
+          onClick={() => handleKpiClick(undefined, 'coachees-overview')}
+          className="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow text-left"
+        >
           <div className="flex items-center">
             <div className="p-2 bg-indigo-100 rounded-lg">
               <Users className="w-5 h-5 text-indigo-600" />
@@ -486,38 +532,50 @@ const MonCoaching = () => {
               <p className="text-2xl font-bold text-gray-900">{getUniqueEmployees().length}</p>
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white p-6 rounded-lg shadow-sm border">
+        <button
+          type="button"
+          onClick={() => handleKpiClick('annual_evaluations', 'annual-evaluations-section')}
+          className="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow text-left"
+        >
           <div className="flex items-center">
             <div className="p-2 bg-green-100 rounded-lg">
               <Target className="w-5 h-5 text-green-600" />
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">{t('coaching.evaluations')}</p>
-              <p className="text-2xl font-bold text-gray-900">{evaluations.length}</p>
+              <p className="text-sm font-medium text-gray-600">Évaluations annuelles</p>
+              <p className="text-2xl font-bold text-gray-900">{annualEvaluations.length}</p>
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white p-6 rounded-lg shadow-sm border">
+        <button
+          type="button"
+          onClick={() => handleKpiClick('annual_evaluations', 'annual-evaluations-section')}
+          className="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow text-left"
+        >
           <div className="flex items-center">
             <div className="p-2 bg-blue-100 rounded-lg">
               <Star className="w-5 h-5 text-blue-600" />
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">{t('coaching.averageScore')}</p>
+              <p className="text-sm font-medium text-gray-600">Note moyenne annuelle</p>
               <p className="text-2xl font-bold text-gray-900">
-                {evaluations.length > 0 
-                  ? (evaluations.reduce((sum, currentEval) => sum + currentEval.note_finale, 0) / evaluations.length).toFixed(1)
+                {annualEvaluations.length > 0
+                  ? (annualEvaluations.reduce((sum, evalItem) => sum + (evalItem.employee_global_score || 0), 0) / annualEvaluations.length).toFixed(1)
                   : '0.0'
                 }/5
               </p>
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white p-6 rounded-lg shadow-sm border">
+        <button
+          type="button"
+          onClick={() => handleKpiClick('objectives', 'annual-objectives-section')}
+          className="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow text-left"
+        >
           <div className="flex items-center">
             <div className="p-2 bg-orange-100 rounded-lg">
               <TrendingUp className="w-5 h-5 text-orange-600" />
@@ -529,7 +587,7 @@ const MonCoaching = () => {
               </p>
             </div>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* Onglets */}
@@ -609,7 +667,7 @@ const MonCoaching = () => {
 
       {/* Vue d'ensemble des coachés */}
       {!selectedEmployee && (
-        <div className="bg-white rounded-lg shadow-sm border">
+        <div id="coachees-overview" className="bg-white rounded-lg shadow-sm border">
           <div className="p-6 border-b border-gray-200">
             <h2 className="text-xl font-semibold text-gray-900">{t('coaching.coacheesOverview')}</h2>
           </div>
@@ -633,12 +691,18 @@ const MonCoaching = () => {
                     </div>
                     <div className="space-y-1 text-sm text-gray-600">
                       <div className="flex justify-between">
-                        <span>{t('coaching.evaluations')}:</span>
+                        <span>Évaluations annuelles:</span>
                         <span>{stats.totalEvaluations}</span>
                       </div>
+                      {stats.lastAnnualStatus && (
+                        <div className="flex justify-between">
+                          <span>Statut:</span>
+                          <span>{stats.lastAnnualStatus === 'reviewed' ? 'Revue' : stats.lastAnnualStatus === 'submitted' ? 'Soumise' : stats.lastAnnualStatus}</span>
+                        </div>
+                      )}
                       {stats.lastEvaluation && (
                         <div className="flex justify-between">
-                          <span>{t('coaching.lastEvaluation')}:</span>
+                          <span>Dernière évaluation:</span>
                           <span>{format(new Date(stats.lastEvaluation), 'dd/MM/yyyy', { locale: fr })}</span>
                         </div>
                       )}
@@ -659,7 +723,7 @@ const MonCoaching = () => {
 
       {/* Contenu des onglets */}
       {activeTab === 'evaluations' && (
-        <div className="space-y-4">
+        <div id="evaluations-section" className="space-y-4">
           {filteredEvaluations.length > 0 ? (
             filteredEvaluations.map((evaluation) => {
               const isExpanded = expandedEvaluations.has(evaluation.evaluation_id);
@@ -870,13 +934,15 @@ const MonCoaching = () => {
 
       {/* Onglet Objectifs annuels */}
       {activeTab === 'objectives' && (
-        <div className="space-y-4">
+        <div id="annual-objectives-section" className="space-y-4">
           {filteredObjectives.length > 0 ? (
             filteredObjectives.map((objective) => {
               const isExpanded = expandedObjectives.has(objective.id);
               const isPending = objective.status === 'submitted';
               const isApproved = objective.status === 'approved';
               const isRejected = objective.status === 'rejected';
+              const annualEvaluation = getAnnualEvaluationForObjective(objective.id);
+              const coachEvaluation = getCoachEvaluationForObjective(objective.id);
               
               return (
                 <div key={objective.id} className="bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow">
@@ -922,6 +988,40 @@ const MonCoaching = () => {
                             {objective.career_pathway?.name || 'Parcours non défini'}
                           </div>
                         </div>
+
+                        {annualEvaluation && (
+                          <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-sm font-medium text-blue-800">Auto-évaluation globale</span>
+                              <div className="flex">
+                                {getScoreStars(annualEvaluation.employee_global_score)}
+                              </div>
+                              <span className="text-sm text-blue-700">({annualEvaluation.employee_global_score}/5)</span>
+                            </div>
+                            {annualEvaluation.employee_global_comment && (
+                              <p className="text-sm text-blue-700">
+                                <strong>Commentaire:</strong> {annualEvaluation.employee_global_comment}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {coachEvaluation && (
+                          <div className="mt-3 bg-purple-50 border border-purple-200 rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-sm font-medium text-purple-800">Évaluation coach globale</span>
+                              <div className="flex">
+                                {getScoreStars(coachEvaluation.coach_global_score)}
+                              </div>
+                              <span className="text-sm text-purple-700">({coachEvaluation.coach_global_score}/5)</span>
+                            </div>
+                            {coachEvaluation.coach_global_comment && (
+                              <p className="text-sm text-purple-700">
+                                <strong>Commentaire:</strong> {coachEvaluation.coach_global_comment}
+                              </p>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -1064,6 +1164,86 @@ const MonCoaching = () => {
                                 </div>
                               </div>
                             ) : null}
+
+                            {annualEvaluation && (
+                              <div className="mt-4 border-t pt-4">
+                                {(() => {
+                                  const evalItem = annualEvaluation.evaluations?.find(
+                                    (item: any) => item.objective_id === obj.skill_id
+                                  );
+                                  const coachEvalItem = coachEvaluation?.coach_evaluations?.find(
+                                    (item: any) => item.objective_id === obj.skill_id
+                                  );
+
+                                  if (!evalItem) {
+                                    return (
+                                      <div className="text-xs text-gray-500">
+                                        Aucune auto-évaluation trouvée pour cet objectif.
+                                      </div>
+                                    );
+                                  }
+
+                                  return (
+                                    <div className="bg-blue-50 rounded p-3">
+                                      <h6 className="text-sm font-medium text-blue-800 mb-2">Auto-évaluation du coaché</h6>
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <div className="flex">
+                                          {getScoreStars(evalItem.employee_score)}
+                                        </div>
+                                        <span className="text-sm text-blue-700">({evalItem.employee_score}/5)</span>
+                                      </div>
+                                      <p className="text-sm text-blue-700 mb-1">
+                                        <strong>Commentaire:</strong> {evalItem.employee_comment}
+                                      </p>
+                                      <p className="text-sm text-blue-700 mb-1">
+                                        <strong>Réalisations:</strong> {evalItem.achievements}
+                                      </p>
+                                      {evalItem.difficulties && (
+                                        <p className="text-sm text-blue-700 mb-1">
+                                          <strong>Difficultés:</strong> {evalItem.difficulties}
+                                        </p>
+                                      )}
+                                      <p className="text-sm text-blue-700 mb-1">
+                                        <strong>Apprentissages:</strong> {evalItem.learnings}
+                                      </p>
+                                      {evalItem.next_steps && (
+                                        <p className="text-sm text-blue-700">
+                                          <strong>Prochaines étapes:</strong> {evalItem.next_steps}
+                                        </p>
+                                      )}
+
+                                      {coachEvalItem && (
+                                        <div className="mt-4 border-t border-blue-200 pt-4">
+                                          <h6 className="text-sm font-medium text-purple-800 mb-2">Évaluation du coach</h6>
+                                          <div className="flex items-center gap-2 mb-2">
+                                            <div className="flex">
+                                              {getScoreStars(coachEvalItem.coach_score)}
+                                            </div>
+                                            <span className="text-sm text-purple-700">({coachEvalItem.coach_score}/5)</span>
+                                          </div>
+                                          <p className="text-sm text-purple-700 mb-1">
+                                            <strong>Commentaire:</strong> {coachEvalItem.coach_comment}
+                                          </p>
+                                          <p className="text-sm text-purple-700 mb-1">
+                                            <strong>Points forts:</strong> {coachEvalItem.strengths}
+                                          </p>
+                                          {coachEvalItem.areas_for_improvement && (
+                                            <p className="text-sm text-purple-700 mb-1">
+                                              <strong>Axes d'amélioration:</strong> {coachEvalItem.areas_for_improvement}
+                                            </p>
+                                          )}
+                                          {coachEvalItem.development_recommendations && (
+                                            <p className="text-sm text-purple-700">
+                                              <strong>Recommandations:</strong> {coachEvalItem.development_recommendations}
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1109,7 +1289,7 @@ const MonCoaching = () => {
 
       {/* Onglet Évaluations annuelles */}
       {activeTab === 'annual_evaluations' && (
-        <div className="space-y-4">
+        <div id="annual-evaluations-section" className="space-y-4">
           {filteredAnnualEvaluations.length > 0 ? (
             filteredAnnualEvaluations.map((evaluation) => {
               const isExpanded = expandedAnnualEvaluations.has(evaluation.id);
