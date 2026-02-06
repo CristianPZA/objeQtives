@@ -35,6 +35,18 @@ interface CareerPathway {
   color: string;
 }
 
+interface CoachProjectChecks {
+  coacheesCount: number;
+  missingProjectAssignments: { id: string; full_name: string }[];
+  missingProjectObjectives: {
+    employee_id: string;
+    full_name: string;
+    project_id: string;
+    project_title: string;
+    project_client: string | null;
+  }[];
+}
+
 const Dashboard = () => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
@@ -42,6 +54,10 @@ const Dashboard = () => {
   const [manager, setManager] = useState<ManagerProfile | null>(null);
   const [careerLevel, setCareerLevel] = useState<CareerLevel | null>(null);
   const [careerPathway, setCareerPathway] = useState<CareerPathway | null>(null);
+  const [annualEvaluationsToDo, setAnnualEvaluationsToDo] = useState(0);
+  const [projectEvaluationsToDo, setProjectEvaluationsToDo] = useState(0);
+  const [isCoach, setIsCoach] = useState(false);
+  const [coachChecks, setCoachChecks] = useState<CoachProjectChecks | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { userCountry } = useAuth();
   const navigate = useNavigate();
@@ -140,6 +156,11 @@ const Dashboard = () => {
           }
         }
 
+        await Promise.all([
+          fetchEvaluationNotifications(user.id),
+          fetchCoachChecks(user.id)
+        ]);
+
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
         setError(errorMessage);
@@ -220,6 +241,118 @@ const Dashboard = () => {
     return colorMap[pathway.color] || 'bg-gray-50 text-gray-700 border-gray-200';
   };
 
+  const formatLimitedList = (items: string[], maxItems = 5) => {
+    if (items.length <= maxItems) {
+      return items.join(', ');
+    }
+    return `${items.slice(0, maxItems).join(', ')} +${items.length - maxItems} autres`;
+  };
+
+  const fetchEvaluationNotifications = async (userId: string) => {
+    try {
+      const { data, error: notificationsError } = await supabase
+        .from('notifications')
+        .select('metadata, is_archived')
+        .eq('destinataire_id', userId)
+        .eq('is_archived', false);
+
+      if (notificationsError) throw notificationsError;
+
+      const notifications = data || [];
+      const annualCount = notifications.filter(notif => notif.metadata?.action_type === 'annual_evaluation_required').length;
+      const projectCount = notifications.filter(notif => notif.metadata?.action_type === 'auto_evaluation_required').length;
+
+      setAnnualEvaluationsToDo(annualCount);
+      setProjectEvaluationsToDo(projectCount);
+    } catch (err) {
+      console.error('Error fetching notifications:', err);
+      setAnnualEvaluationsToDo(0);
+      setProjectEvaluationsToDo(0);
+    }
+  };
+
+  const fetchCoachChecks = async (userId: string) => {
+    try {
+      const { data: coachees, error: coacheesError } = await supabase
+        .from('user_profiles')
+        .select('id, full_name')
+        .eq('coach_id', userId);
+
+      if (coacheesError) throw coacheesError;
+
+      if (!coachees || coachees.length === 0) {
+        setIsCoach(false);
+        setCoachChecks(null);
+        return;
+      }
+
+      setIsCoach(true);
+      const coacheeIds = coachees.map(coachee => coachee.id);
+
+      const { data: collaborations, error: collaborationsError } = await supabase
+        .from('projet_collaborateurs')
+        .select(`
+          id,
+          employe_id,
+          is_active,
+          projet:projets(
+            id,
+            titre,
+            nom_client
+          )
+        `)
+        .in('employe_id', coacheeIds)
+        .eq('is_active', true);
+
+      if (collaborationsError) throw collaborationsError;
+
+      const activeCollaborations = collaborations || [];
+      const collaborationIds = activeCollaborations.map(collab => collab.id);
+
+      const objectifsByCollab = new Map<string, any[]>();
+      if (collaborationIds.length > 0) {
+        const { data: objectifsData, error: objectifsError } = await supabase
+          .from('objectifs_collaborateurs')
+          .select('collaboration_id, objectifs')
+          .in('collaboration_id', collaborationIds);
+
+        if (objectifsError) throw objectifsError;
+
+        (objectifsData || []).forEach(item => {
+          objectifsByCollab.set(item.collaboration_id, item.objectifs || []);
+        });
+      }
+
+      const coacheesWithProjects = new Set(activeCollaborations.map(collab => collab.employe_id));
+      const missingProjectAssignments = coachees.filter(coachee => !coacheesWithProjects.has(coachee.id));
+
+      const missingProjectObjectives: CoachProjectChecks['missingProjectObjectives'] = [];
+      activeCollaborations.forEach(collab => {
+        const objectifs = objectifsByCollab.get(collab.id);
+        if (!objectifs || objectifs.length === 0) {
+          const coachee = coachees.find(item => item.id === collab.employe_id);
+          missingProjectObjectives.push({
+            employee_id: collab.employe_id,
+            full_name: coachee?.full_name || 'Collaborateur',
+            project_id: collab.projet?.id || '',
+            project_title: collab.projet?.titre || 'Projet',
+            project_client: collab.projet?.nom_client || null
+          });
+        }
+      });
+
+      setCoachChecks({
+        coacheesCount: coachees.length,
+        missingProjectAssignments,
+        missingProjectObjectives
+      });
+    } catch (err) {
+      console.error('Error checking coach projects:', err);
+      setIsCoach(false);
+      setCoachChecks(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-8 flex justify-center">
@@ -251,6 +384,10 @@ const Dashboard = () => {
   }
 
   const welcomeMsg = getWelcomeMessage(profile.role || '');
+  const hasAnnualEvaluationsToDo = annualEvaluationsToDo > 0;
+  const hasProjectEvaluationsToDo = projectEvaluationsToDo > 0;
+  const missingAssignments = coachChecks?.missingProjectAssignments || [];
+  const missingObjectives = coachChecks?.missingProjectObjectives || [];
 
   return (
     <div className="space-y-8">
@@ -401,6 +538,114 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* To-do section */}
+      <div className="bg-white rounded-lg shadow-sm border">
+        <div className="p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">À faire</h2>
+        </div>
+        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className={`flex items-start gap-4 p-4 rounded-lg border ${hasAnnualEvaluationsToDo ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+            {hasAnnualEvaluationsToDo ? (
+              <AlertTriangle className="w-6 h-6 text-orange-600" />
+            ) : (
+              <CheckCircle className="w-6 h-6 text-green-600" />
+            )}
+            <div className="flex-1">
+              <p className="text-sm font-medium text-gray-700">Évaluations annuelles à réaliser</p>
+              <p className={`text-lg font-semibold ${hasAnnualEvaluationsToDo ? 'text-orange-700' : 'text-green-700'}`}>
+                {hasAnnualEvaluationsToDo ? `${annualEvaluationsToDo} en attente` : 'Aucune en attente'}
+              </p>
+              {hasAnnualEvaluationsToDo && (
+                <button
+                  onClick={() => navigate('/objectifs-annuels')}
+                  className="mt-2 text-sm text-orange-700 hover:text-orange-800 underline"
+                >
+                  Voir les évaluations annuelles
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className={`flex items-start gap-4 p-4 rounded-lg border ${hasProjectEvaluationsToDo ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+            {hasProjectEvaluationsToDo ? (
+              <AlertTriangle className="w-6 h-6 text-orange-600" />
+            ) : (
+              <CheckCircle className="w-6 h-6 text-green-600" />
+            )}
+            <div className="flex-1">
+              <p className="text-sm font-medium text-gray-700">Évaluations projets à réaliser</p>
+              <p className={`text-lg font-semibold ${hasProjectEvaluationsToDo ? 'text-orange-700' : 'text-green-700'}`}>
+                {hasProjectEvaluationsToDo ? `${projectEvaluationsToDo} en attente` : 'Aucune en attente'}
+              </p>
+              {hasProjectEvaluationsToDo && (
+                <button
+                  onClick={() => navigate('/fiches-projets')}
+                  className="mt-2 text-sm text-orange-700 hover:text-orange-800 underline"
+                >
+                  Voir les évaluations projets
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Coaching checks */}
+      {isCoach && coachChecks && (
+        <div className="bg-white rounded-lg shadow-sm border">
+          <div className="p-6 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900">Suivi des coachés</h2>
+          </div>
+          <div className="p-6 space-y-4">
+            <div className={`flex items-start gap-4 p-4 rounded-lg border ${missingAssignments.length > 0 ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+              {missingAssignments.length > 0 ? (
+                <AlertTriangle className="w-6 h-6 text-orange-600" />
+              ) : (
+                <CheckCircle className="w-6 h-6 text-green-600" />
+              )}
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-700">Coachés sans projet assigné</p>
+                <p className={`text-lg font-semibold ${missingAssignments.length > 0 ? 'text-orange-700' : 'text-green-700'}`}>
+                  {missingAssignments.length > 0
+                    ? `${missingAssignments.length} à assigner`
+                    : 'Tous assignés à un projet'}
+                </p>
+                {missingAssignments.length > 0 && (
+                  <p className="text-sm text-orange-700 mt-1">
+                    {formatLimitedList(missingAssignments.map(item => item.full_name))}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className={`flex items-start gap-4 p-4 rounded-lg border ${missingObjectives.length > 0 ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+              {missingObjectives.length > 0 ? (
+                <AlertTriangle className="w-6 h-6 text-orange-600" />
+              ) : (
+                <CheckCircle className="w-6 h-6 text-green-600" />
+              )}
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-700">Objectifs projets à définir</p>
+                <p className={`text-lg font-semibold ${missingObjectives.length > 0 ? 'text-orange-700' : 'text-green-700'}`}>
+                  {missingObjectives.length > 0
+                    ? `${missingObjectives.length} projet(s) incomplet(s)`
+                    : 'Tous les objectifs projets sont définis'}
+                </p>
+                {missingObjectives.length > 0 && (
+                  <p className="text-sm text-orange-700 mt-1">
+                    {formatLimitedList(
+                      missingObjectives.map(item =>
+                        `${item.full_name} — ${item.project_title}${item.project_client ? ` (${item.project_client})` : ''}`
+                      )
+                    )}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Recent Activity */}
       <div className="bg-white rounded-lg shadow-sm border">
