@@ -42,6 +42,30 @@ interface AnnualEvaluation {
   submitted_at: string;
 }
 
+interface CoachEvaluationData {
+  objective_id: string;
+  skill_description: string;
+  coach_score: number;
+  coach_comment: string;
+  strengths: string;
+  areas_for_improvement: string;
+  development_recommendations: string;
+}
+
+interface AnnualCoachEvaluation {
+  id: string;
+  annual_evaluation_id: string;
+  annual_objective_id: string;
+  coach_id: string;
+  employee_id: string;
+  year: number;
+  coach_evaluations: CoachEvaluationData[];
+  coach_global_comment: string;
+  coach_global_score: number;
+  status: string;
+  completed_at: string;
+}
+
 interface ViewAnnualEvaluationModalProps {
   objective: any;
   onClose: () => void;
@@ -57,6 +81,7 @@ const ViewAnnualEvaluationModal: React.FC<ViewAnnualEvaluationModalProps> = ({
 }) => {
   const { t } = useTranslation();
   const [evaluation, setEvaluation] = useState<AnnualEvaluation | null>(null);
+  const [coachEvaluation, setCoachEvaluation] = useState<AnnualCoachEvaluation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,6 +102,20 @@ const ViewAnnualEvaluationModal: React.FC<ViewAnnualEvaluationModalProps> = ({
 
       if (error) throw error;
       setEvaluation(data);
+
+      if (data?.id) {
+        const { data: coachData, error: coachError } = await supabase
+          .from('annual_coach_evaluations')
+          .select('*')
+          .eq('annual_evaluation_id', data.id)
+          .eq('employee_id', objective.employee_id)
+          .maybeSingle();
+
+        if (coachError) throw coachError;
+        setCoachEvaluation(coachData || null);
+      } else {
+        setCoachEvaluation(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur lors du chargement');
     } finally {
@@ -213,6 +252,61 @@ const ViewAnnualEvaluationModal: React.FC<ViewAnnualEvaluationModalProps> = ({
             </div>
           </div>
 
+          {/* Évaluation du coach */}
+          {(currentUserId === objective.employee_id || userRole === 'admin' || userRole === 'coach') && (
+            <div className="mb-8 border border-gray-200 rounded-lg p-6 bg-gradient-to-br from-purple-50 to-white">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-purple-100 rounded-lg">
+                  <TrendingUp className="w-6 h-6 text-purple-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900">Évaluation du coach</h3>
+              </div>
+
+              {!coachEvaluation ? (
+                <div className="bg-white border border-gray-200 rounded-lg p-4 text-sm text-gray-600">
+                  L'évaluation du coach n'est pas encore disponible.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-sm font-medium text-gray-700">Note globale :</span>
+                      <div className={`px-3 py-1 rounded-full ${getScoreColor(coachEvaluation.coach_global_score)}`}>
+                        <div className="flex items-center gap-2">
+                          {Array.from({ length: coachEvaluation.coach_global_score }, (_, i) => (
+                            <Star key={i} className="w-4 h-4 fill-current text-yellow-400" />
+                          ))}
+                          <span className="text-sm font-medium ml-1">
+                            {getScoreLabel(coachEvaluation.coach_global_score)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Commentaire global du coach :</h4>
+                    <div className="bg-white border border-gray-200 rounded-lg p-4">
+                      <p className="text-gray-700 whitespace-pre-wrap">{coachEvaluation.coach_global_comment}</p>
+                    </div>
+                  </div>
+
+                  {coachEvaluation.completed_at && (
+                    <div className="text-xs text-gray-500">
+                      Évaluation coach réalisée le {new Date(coachEvaluation.completed_at).toLocaleDateString('fr-FR', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Évaluations par objectif */}
           <div className="space-y-6">
             <h3 className="text-lg font-semibold text-gray-900">Détail par objectif</h3>
@@ -220,6 +314,9 @@ const ViewAnnualEvaluationModal: React.FC<ViewAnnualEvaluationModalProps> = ({
             {evaluation.evaluations.map((evalItem: EvaluationData, index: number) => {
               const objectiveDetail = objective.objectives.find(
                 (obj: ObjectiveDetail) => obj.skill_id === evalItem.objective_id
+              );
+              const coachEvalItem = coachEvaluation?.coach_evaluations?.find(
+                (coachItem: CoachEvaluationData) => coachItem.objective_id === evalItem.objective_id
               );
 
               if (!objectiveDetail) return null;
@@ -300,6 +397,48 @@ const ViewAnnualEvaluationModal: React.FC<ViewAnnualEvaluationModalProps> = ({
                       </div>
                     )}
                   </div>
+
+                  {/* Évaluation coach */}
+                  {coachEvalItem && (
+                    <div className="mt-4 border-t pt-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-sm font-medium text-gray-700">Évaluation coach :</span>
+                        <div className={`px-3 py-1 rounded-full ${getScoreColor(coachEvalItem.coach_score)}`}>
+                          <div className="flex items-center gap-1">
+                            {Array.from({ length: coachEvalItem.coach_score }, (_, i) => (
+                              <Star key={i} className="w-3 h-3 fill-current text-yellow-400" />
+                            ))}
+                            <span className="text-xs font-medium ml-1">
+                              {getScoreLabel(coachEvalItem.coach_score)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3">
+                        <div>
+                          <h5 className="text-sm font-medium text-gray-700 mb-1">Commentaire :</h5>
+                          <p className="text-sm text-gray-600 bg-purple-50 rounded p-3">{coachEvalItem.coach_comment}</p>
+                        </div>
+                        <div>
+                          <h5 className="text-sm font-medium text-gray-700 mb-1">Points forts :</h5>
+                          <p className="text-sm text-gray-600 bg-green-50 rounded p-3">{coachEvalItem.strengths}</p>
+                        </div>
+                        {coachEvalItem.areas_for_improvement && (
+                          <div>
+                            <h5 className="text-sm font-medium text-gray-700 mb-1">Axes d'amélioration :</h5>
+                            <p className="text-sm text-gray-600 bg-orange-50 rounded p-3">{coachEvalItem.areas_for_improvement}</p>
+                          </div>
+                        )}
+                        {coachEvalItem.development_recommendations && (
+                          <div>
+                            <h5 className="text-sm font-medium text-gray-700 mb-1">Recommandations :</h5>
+                            <p className="text-sm text-gray-600 bg-blue-50 rounded p-3">{coachEvalItem.development_recommendations}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

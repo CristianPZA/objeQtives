@@ -160,11 +160,76 @@ const AnnualEvaluationCoachModal: React.FC<AnnualEvaluationCoachModalProps> = ({
         .update({ status: 'evaluated' })
         .eq('id', objective.id);
 
+      await createCoachEvaluationNotification(user.id);
+
       onSuccess();
     } catch (err) {
       onError(err instanceof Error ? err.message : t('evaluation.errorSubmitting'));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const createCoachEvaluationNotificationLegacy = async (coachId: string) => {
+    try {
+      const employeeName = objective?.employee?.full_name || 'votre coach';
+      const { error } = await supabase
+        .from('notifications')
+        .insert([{
+          destinataire_id: objective.employee_id,
+          expediteur_id: coachId,
+          titre: 'Évaluation annuelle du coach disponible',
+          message: `Votre coach ${employeeName} a complété votre évaluation annuelle. Vous შეგიძლიათ la consulter dans vos objectifs annuels.`,
+          type: 'info',
+          priority: 2,
+          action_url: '/objectifs-annuels',
+          metadata: {
+            annual_objective_id: objective.id,
+            annual_evaluation_id: employeeEvaluation.id,
+            year: objective.year,
+            action_type: 'annual_coach_evaluation_completed'
+          }
+        }]);
+
+      if (error) {
+        console.error('Erreur lors de la création de la notification coach:', error);
+      }
+    } catch (err) {
+      console.error('Erreur lors de la création de la notification coach:', err);
+    }
+  };
+
+  const createCoachEvaluationNotification = async (coachId: string) => {
+    try {
+      const { data: coachProfile } = await supabase
+        .from('user_profiles')
+        .select('full_name')
+        .eq('id', coachId)
+        .maybeSingle();
+      const coachName = coachProfile?.full_name || 'votre coach';
+      const { error } = await supabase
+        .from('notifications')
+        .insert([{
+          destinataire_id: objective.employee_id,
+          expediteur_id: coachId,
+          titre: 'Évaluation annuelle du coach disponible',
+          message: `Votre coach ${coachName} a complété votre évaluation annuelle. Vous pouvez la consulter dans vos objectifs annuels.`,
+          type: 'info',
+          priority: 2,
+          action_url: '/objectifs-annuels',
+          metadata: {
+            annual_objective_id: objective.id,
+            annual_evaluation_id: employeeEvaluation.id,
+            year: objective.year,
+            action_type: 'annual_coach_evaluation_completed'
+          }
+        }]);
+
+      if (error) {
+        console.error('Erreur lors de la création de la notification coach:', error);
+      }
+    } catch (err) {
+      console.error('Erreur lors de la création de la notification coach:', err);
     }
   };
 
@@ -342,14 +407,14 @@ const AnnualEvaluationCoachModal: React.FC<AnnualEvaluationCoachModalProps> = ({
                       {Array.from({ length: 5 }, (_, i) => (
                         <Star 
                           key={i} 
-                          className={`w-4 h-4 ${i < currentEmployeeEvaluation.evaluation_score ? 'fill-current text-yellow-400' : 'text-gray-300'}`} 
+                          className={`w-4 h-4 ${i < currentEmployeeEvaluation.employee_score ? 'fill-current text-yellow-400' : 'text-gray-300'}`} 
                         />
                       ))}
                     </div>
-                    <span className="text-sm text-blue-700">({currentEmployeeEvaluation.evaluation_score}/5)</span>
+                    <span className="text-sm text-blue-700">({currentEmployeeEvaluation.employee_score}/5)</span>
                   </div>
                   <p className="text-sm text-blue-700">
-                    <strong>Commentaire:</strong> {currentEmployeeEvaluation.evaluation_comment}
+                    <strong>Commentaire:</strong> {currentEmployeeEvaluation.employee_comment}
                   </p>
                   <p className="text-sm text-blue-700 mt-1">
                     <strong>Réalisations:</strong> {currentEmployeeEvaluation.achievements}

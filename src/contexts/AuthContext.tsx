@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  profileLoading: boolean;
   signOut: () => Promise<void>;
   userCountry: string | null;
   userRole: string | null;
@@ -13,6 +14,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({ 
   user: null, 
   loading: true,
+  profileLoading: true,
   signOut: async () => {},
   userCountry: null,
   userRole: null
@@ -23,6 +25,7 @@ export const useAuth = () => useContext(AuthContext);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [userCountry, setUserCountry] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
 
@@ -30,6 +33,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await supabase.auth.signOut();
       setUser(null);
+      setProfileLoading(false);
       setUserCountry(null);
       setUserRole(null);
       localStorage.removeItem('userRole');
@@ -39,6 +43,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const fetchUserProfile = async (userId: string) => {
+    setProfileLoading(true);
     try {
       const { data, error } = await supabase
         .from('user_profiles')
@@ -60,6 +65,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (error) {
       console.error('Error in fetchUserProfile:', error);
+    } finally {
+      setProfileLoading(false);
     }
   };
 
@@ -97,6 +104,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(user);
         if (user) {
           fetchUserProfile(user.id);
+        } else {
+          setProfileLoading(false);
         }
       }
       setLoading(false);
@@ -116,6 +125,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUserCountry(null);
         setUserRole(null);
         localStorage.removeItem('userRole');
+        setProfileLoading(false);
       }
       setLoading(false);
     });
@@ -176,7 +186,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, signOut, userCountry, userRole }}>
+    <AuthContext.Provider value={{ user, loading, profileLoading, signOut, userCountry, userRole }}>
       {children}
     </AuthContext.Provider>
   );

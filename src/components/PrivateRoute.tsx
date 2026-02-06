@@ -8,9 +8,9 @@ interface PrivateRouteProps {
 }
 
 const PrivateRoute: React.FC<PrivateRouteProps> = ({ children, adminOnly = false }) => {
-  const { user, loading } = useAuth();
+  const { user, loading, profileLoading, userRole } = useAuth();
 
-  if (loading) {
+  if (loading || (adminOnly && profileLoading)) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
@@ -24,9 +24,6 @@ const PrivateRoute: React.FC<PrivateRouteProps> = ({ children, adminOnly = false
 
   // Si la route est réservée aux admins, vérifier le rôle de l'utilisateur
   if (adminOnly) {
-    // Récupérer le rôle depuis le contexte d'authentification
-    const userRole = localStorage.getItem('userRole');
-    
     if (userRole !== 'admin') {
       // Rediriger vers le dashboard si l'utilisateur n'est pas admin
       return <Navigate to="/dashboard" />;
